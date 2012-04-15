@@ -10,7 +10,7 @@ OPTIMIZATION = -Os
 
 ASM_OBJECTS = cc32/start.o
 
-C_OBJECTS = main.o cc32/cc32_flcon.o cc32/cc32_irq.o cc32/iso7816_slave.o
+C_OBJECTS = main.o cc32/cc32_flcon.o cc32/cc32_irq.o cc32/iso7816_slave.o cc32/cc32_spi.o
 
 
 CFLAGS = -Wall -ffunction-sections -fno-exceptions -nostartfiles -nostdlib #-mthumb

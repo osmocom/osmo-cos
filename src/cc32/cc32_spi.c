@@ -19,11 +19,12 @@
 
 #include <errno.h>
 
+#include "cc32_sysc.h"
 #include "cc32_spi.h"
 
 #define CC32_SPI_BASE	0x0f9800
 
-enum cc32_flcon_reg {
+enum cc32_spi_reg {
 	SPICON2		= 0x08,
 	SPIDAT		= 0x0C,
 	SPISTS		= 0x10,
@@ -60,6 +61,8 @@ enum cc32_flcon_reg {
 int cc32_spi_init(uint8_t cpol, uint8_t cpha, uint8_t divide_2n)
 {
 	uint32_t val;
+
+	cc32_sysc_clk_enable(CLK_SPI);
 
 	if (divide_2n < 2 || divide_2n > 256)
 		return -EINVAL;

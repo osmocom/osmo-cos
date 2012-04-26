@@ -1,4 +1,5 @@
 
+#include "cc32_sysc.h"
 #include "cc32_irq.h"
 
 #define CC32_SYSC_BASE	0x0F0000
@@ -37,4 +38,14 @@ void cc32_irq_disable(enum cc32_irq irq)
 void cc32_irq_register(enum cc32_irq irq, void (*handler)(enum cc32_irq irq))
 {
 	/* FIXME */
+}
+
+void cc32_sysc_clk_enable(enum cc32_clk clk)
+{
+	*SYSC_REG(SCCM0) |= clk;
+}
+
+void cc32_sysc_clk_disable(enum cc32_clk clk)
+{
+	*SYSC_REG(SCCM0) &= ~clk;
 }

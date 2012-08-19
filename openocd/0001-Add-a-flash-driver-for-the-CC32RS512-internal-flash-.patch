@@ -1,0 +1,379 @@
+From 93e330366eaad93ebcd764890ea4aa7e042737cd Mon Sep 17 00:00:00 2001
+From: Harald Welte <laforge@gnumonks.org>
+Date: Sun, 19 Aug 2012 14:25:20 +0200
+Subject: [PATCH] Add a flash driver for the CC32RS512 internal flash
+ controller
+
+---
+ src/flash/nor/Makefile.am |    3 +-
+ src/flash/nor/cc32rs512.c |  323 +++++++++++++++++++++++++++++++++++++++++++++
+ src/flash/nor/drivers.c   |    2 +
+ 3 files changed, 327 insertions(+), 1 deletion(-)
+ create mode 100644 src/flash/nor/cc32rs512.c
+
+diff --git a/src/flash/nor/Makefile.am b/src/flash/nor/Makefile.am
+index fc64602..d789834 100644
+--- a/src/flash/nor/Makefile.am
++++ b/src/flash/nor/Makefile.am
+@@ -34,7 +34,8 @@ NOR_DRIVERS = \
+ 	virtual.c \
+ 	fm3.c \
+ 	dsp5680xx_flash.c \
+-	kinetis.c
++	kinetis.c \
++	cc32rs512.c
+ 
+ noinst_HEADERS = \
+ 	core.h \
+diff --git a/src/flash/nor/cc32rs512.c b/src/flash/nor/cc32rs512.c
+new file mode 100644
+index 0000000..7a750a1
+--- /dev/null
++++ b/src/flash/nor/cc32rs512.c
+@@ -0,0 +1,323 @@
++/***************************************************************************
++ *   Copyright (C) 2012 Harald Welte <laforge@gnumonks.org>                *
++ *                                                                         *
++ *   This program is free software; you can redistribute it and/or modify  *
++ *   it under the terms of the GNU General Public License as published by  *
++ *   the Free Software Foundation; either version 2 of the License, or     *
++ *   (at your option) any later version.                                   *
++ *                                                                         *
++ *   This program is distributed in the hope that it will be useful,       *
++ *   but WITHOUT ANY WARRANTY; without even the implied warranty of        *
++ *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         *
++ *   GNU General Public License for more details.                          *
++ *                                                                         *
++ *   You should have received a copy of the GNU General Public License     *
++ *   along with this program; if not, write to the                         *
++ *   Free Software Foundation, Inc.,                                       *
++ *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
++ ***************************************************************************/
++
++#ifdef HAVE_CONFIG_H
++#include "config.h"
++#endif
++
++#include "imp.h"
++#include <target/image.h>
++#include "hello.h"
++
++struct cc32rs512_flash_bank {
++	struct target *target;
++	uint8_t *memory;
++	uint32_t start_address;
++
++	uint32_t flbuf;
++	uint32_t sector_size;
++};
++
++#define RAM_BASE	0xc0000
++#define RAM_SIZE	(18*1024)
++
++/* According to the manual, this should be the default: */
++//#define FLBUF_BASE(psz)	((RAM_BASE + RAM_SIZE) - (psz))
++/* But: This is where the bootloader places its buffer */
++#define FLBUF_BASE(x)	(RAM_BASE + 0x10)
++
++static const int sectorSize = 256;
++
++
++#define FLCON_BASE	0x0f2000
++
++enum flcon_reg {
++	FLCON		= 0x00,
++	FLSDP1		= 0x04,
++	FLSDP2		= 0x08,
++	FLSTS		= 0x0C,
++	FLBUF		= 0x10,
++};
++
++#define FLCON_REG(x)	(FLCON_BASE + (x))
++
++/* flash bank faux <base> <size> <chip_width> <bus_width> <target#> <driverPath>
++ */
++FLASH_BANK_COMMAND_HANDLER(cc32rs512_flash_bank_command)
++{
++	struct cc32rs512_flash_bank *info;
++
++	if (CMD_ARGC < 6)
++		return ERROR_COMMAND_SYNTAX_ERROR;
++
++	info = malloc(sizeof(struct cc32rs512_flash_bank));
++	if (info == NULL) {
++		LOG_ERROR("no memory for flash bank info");
++		return ERROR_FAIL;
++	}
++
++	info->start_address = 0;
++	info->sector_size = sectorSize;
++	info->flbuf = FLBUF_BASE(info->sector_size);
++
++	bank->driver_priv = info;
++
++	int i = 0;
++	uint32_t offset = 0;
++	bank->num_sectors = bank->size/info->sector_size;
++	bank->sectors = malloc(sizeof(struct flash_sector) * bank->num_sectors);
++	for (i = 0; i < bank->num_sectors; i++) {
++		bank->sectors[i].offset = offset;
++		bank->sectors[i].size = info->sector_size;
++		offset += bank->sectors[i].size;
++		bank->sectors[i].is_erased = -1;
++		bank->sectors[i].is_protected = 0;
++	}
++
++	info->target = get_target(CMD_ARGV[5]);
++	if (info->target == NULL) {
++		LOG_ERROR("target '%s' not defined", CMD_ARGV[5]);
++		free(info->memory);
++		free(info);
++		return ERROR_FAIL;
++	}
++	return ERROR_OK;
++}
++
++static int cc32rs512_getstatus(struct target *target)
++{
++	uint32_t tmp;
++	target_read_u32(target, FLCON_REG(FLSTS), &tmp);
++
++	return tmp;
++}
++
++static uint32_t cc32rs512_wait_status(struct target *target, int timeout)
++{
++	uint32_t status;
++
++	while (!(status = cc32rs512_getstatus(target))  && (timeout-- > 0)) {
++		alive_sleep(1);
++	}
++	return  status;
++}
++
++static int cc32rs512_erase(struct flash_bank *bank, int first, int last)
++{
++	struct cc32rs512_flash_bank *info = bank->driver_priv;
++	struct target *target = bank->target;
++	uint32_t status;
++	int sec;
++
++	if (target->state != TARGET_HALTED) {
++		LOG_ERROR("Target not halted");
++		return ERROR_TARGET_NOT_HALTED;
++	}
++
++	if ((first < 0) || (last < first) || (last >= bank->num_sectors))
++		return ERROR_FLASH_SECTOR_INVALID;
++
++	switch (info->sector_size) {
++	case 256:
++		target_write_u32(target, FLCON_REG(FLCON), (1 << 3));
++		break;
++	case 512:
++		target_write_u32(target, FLCON_REG(FLCON), (0 << 3));
++		break;
++	default:
++		return ERROR_FAIL;
++	}
++
++	for (sec = first; sec <= last; sec++) {
++		/* FIXME: disable interrupts if we're flashing the firrst page? */
++
++		/* clear all flags */
++		target_write_u32(target, FLCON_REG(FLSTS), 3);
++		target_write_u32(target, FLCON_REG(FLSDP1), 0x55);
++		target_write_u32(target, FLCON_REG(FLSDP2), 0xAA);
++
++		/* FIXME: offset of flash bank? */
++		LOG_DEBUG("erase: start_addr = 0x%x, sec = %u, size = %u, result = 0x%x\n",
++				info->start_address, sec, info->sector_size,
++				info->start_address + sec*info->sector_size);
++		target_write_u32(target, info->start_address + sec*info->sector_size, 0xff);
++
++		status = cc32rs512_wait_status(target, 1000);
++		switch (status) {
++		case 0:
++			LOG_ERROR("timeout waiting for FLSTS finish\n");
++			return ERROR_FAIL;
++		case 1:
++			break;
++		default:
++			LOG_ERROR("Error (FLSTS=0x%x) during erase", status);
++			return ERROR_FAIL;
++		}
++
++		target_write_u32(target, FLCON_REG(FLSTS), 3);
++
++		bank->sectors[sec].is_erased = 1;
++	}
++
++	return ERROR_OK;
++}
++
++static int cc32rs512_protect(struct flash_bank *bank, int set, int first, int last)
++{
++	/* this chip has no protection */
++	return ERROR_FAIL;
++}
++
++static int cc32rs512_write(struct flash_bank *bank, uint8_t *buffer, uint32_t offset, uint32_t count)
++{
++	struct cc32rs512_flash_bank *info = bank->driver_priv;
++	struct target *target = bank->target;
++	uint32_t status;
++	uint32_t first_page, last_page, pagen, buffer_pos;
++
++	LOG_DEBUG("cc32rs512_write entered!");
++
++	if (target->state != TARGET_HALTED) {
++		LOG_ERROR("Target not halted");
++		return ERROR_TARGET_NOT_HALTED;
++	}
++
++	if (offset + count > bank->size)
++		return ERROR_FLASH_DST_OUT_OF_BANK;
++
++	if (offset % info->sector_size) {
++		LOG_WARNING("offset 0x%" PRIx32 " breaks required alignment 0x%" PRIx32 "",
++			offset, info->sector_size);
++		return ERROR_FLASH_DST_BREAKS_ALIGNMENT;
++	}
++
++	first_page = offset / info->sector_size;
++	last_page = DIV_ROUND_UP(offset + count, info->sector_size);
++
++	LOG_DEBUG("first_page: %i, last_page: %i, count %i",
++		(int)first_page, (int)last_page, (int)count);
++
++	switch (info->sector_size) {
++	case 256:
++		target_write_u32(target, FLCON_REG(FLCON), (1 << 3));
++		break;
++	case 512:
++		target_write_u32(target, FLCON_REG(FLCON), (0 << 3));
++		break;
++	default:
++		return ERROR_FAIL;
++	}
++
++	target_write_u32(target, FLCON_REG(FLBUF), info->flbuf);
++
++	buffer_pos = 0;
++	for (pagen = first_page; pagen < last_page; pagen++) {
++		/* write to flash buffer base address */
++		target_write_memory(target, info->flbuf, 4, info->sector_size/4,
++				    buffer + buffer_pos);
++
++		/* FIXME: disable interrupts if we're flashing the firrst page? */
++
++		/* clear all flags */
++		target_write_u32(target, FLCON_REG(FLSTS), 3);
++		target_write_u32(target, FLCON_REG(FLSDP1), 0xAA);
++		target_write_u32(target, FLCON_REG(FLSDP2), 0x55);
++
++		/* FIXME: offset of flash bank? */
++		target_write_u32(target, info->start_address + pagen*info->sector_size, 0x00);
++
++
++		status = cc32rs512_wait_status(target, 1000);
++		switch (status) {
++		case 0:
++			LOG_ERROR("timeout waiting for FLSTS finish\n");
++			return ERROR_FAIL;
++		case 1:
++			break;
++		default:
++			LOG_ERROR("Error (FLSTS=0x%x) during write", status);
++			return ERROR_FAIL;
++		}
++
++		target_write_u32(target, FLCON_REG(FLSTS), 3);
++
++		buffer_pos += info->sector_size;
++	}
++
++	return ERROR_OK;
++}
++
++static int cc32rs512_protect_check(struct flash_bank *bank)
++{
++	/* is_protected is initialized to 0 and we never change it */
++	return ERROR_OK;
++}
++
++static int cc32rs512_info(struct flash_bank *bank, char *buf, int buf_size)
++{
++	struct cc32rs512_flash_bank *info = bank->driver_priv;
++	int printed;
++
++	printed = snprintf(buf, buf_size, "cc32rs512 flash driver\n");
++	buf += printed;
++	buf_size -= printed;
++
++	printed = snprintf(buf, buf_size, "Page Size: %u, Buffer Base: 0x%08x\n",
++			   info->sector_size, info->flbuf);
++	buf += printed;
++	buf_size -= printed;
++
++	return ERROR_OK;
++}
++
++static int cc32rs512_probe(struct flash_bank *bank)
++{
++
++	if (bank->target->state != TARGET_HALTED) {
++		LOG_ERROR("Target not halted");
++		return ERROR_TARGET_NOT_HALTED;
++	}
++	/* there's no way to probe this peripheral */
++	return ERROR_OK;
++}
++
++static const struct command_registration cc32rs512_command_handlers[] = {
++	{
++		.name = "cc32rs512",
++		.mode = COMMAND_ANY,
++		.help = "cc32rs512 flash command group",
++		.chain = hello_command_handlers,
++	},
++	COMMAND_REGISTRATION_DONE
++};
++
++struct flash_driver cc32rs512_flash = {
++	.name = "cc32rs512",
++	.commands = cc32rs512_command_handlers,
++	.flash_bank_command = cc32rs512_flash_bank_command,
++	.erase = cc32rs512_erase,
++	.protect = cc32rs512_protect,
++	.write = cc32rs512_write,
++	.read = default_flash_read,
++	.probe = cc32rs512_probe,
++	.auto_probe = cc32rs512_probe,
++	.erase_check = default_flash_blank_check,
++	.protect_check = cc32rs512_protect_check,
++	.info = cc32rs512_info
++};
+diff --git a/src/flash/nor/drivers.c b/src/flash/nor/drivers.c
+index 69c3387..fa0e199 100644
+--- a/src/flash/nor/drivers.c
++++ b/src/flash/nor/drivers.c
+@@ -48,6 +48,7 @@ extern struct flash_driver em357_flash;
+ extern struct flash_driver dsp5680xx_flash;
+ extern struct flash_driver fm3_flash;
+ extern struct flash_driver kinetis_flash;
++extern struct flash_driver cc32rs512_flash;
+ 
+ /**
+  * The list of built-in flash drivers.
+@@ -80,6 +81,7 @@ static struct flash_driver *flash_drivers[] = {
+ 	&fm3_flash,
+ 	&dsp5680xx_flash,
+ 	&kinetis_flash,
++	&cc32rs512_flash,
+ 	NULL,
+ };
+ 
+-- 
+1.7.10.4
+

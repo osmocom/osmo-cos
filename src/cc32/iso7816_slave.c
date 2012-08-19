@@ -1,9 +1,16 @@
 
 #include <stdint.h>
-#include <memory.h>
 #include <errno.h>
 
 #include "cc32_irq.h"
+
+#ifndef readl
+#define readl(addr)	*((unsigned long *)addr)
+#endif
+
+#ifndef writel
+#define writel(what, addr) *((unsigned long *)addr) = (what)
+#endif
 
 enum iso_slave_reg {
 	ISOCON		= 0x00,

@@ -83,7 +83,9 @@ int cc32_spi_init(uint8_t cpol, uint8_t cpha, uint8_t divide_2n)
 
 	val = ((cpol & 1) << 0) | ((cpha & 1) << 1) | ((divide_2n-1) << 2) | SPICON2_RUNEN;
 
-	*SPI_REG(SPICON2) = val;
+	/* this is an undocumented value, but without it seems the SPI
+	 * is not working! */
+	*SPI_REG(SPICON2) = val | 0x60;
 
 	return 0;
 }

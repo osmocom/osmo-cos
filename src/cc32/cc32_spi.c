@@ -21,6 +21,8 @@
 
 #include "cc32_sysc.h"
 #include "cc32_spi.h"
+#include "cc32_gpio.h"
+#include "board.h"
 
 #define CC32_SPI_BASE	0x0f9800
 
@@ -64,6 +66,18 @@ int cc32_spi_init(uint8_t cpol, uint8_t cpha, uint8_t divide_2n)
 
 	cc32_sysc_clk_enable(CLK_SPI);
 
+	/* configure GPIOs as output */
+	cc32_gpio_output(24, 1);
+	cc32_gpio_output(25, 1);
+	cc32_gpio_output(26, 1);
+	/* configure P3 as SPI function */
+	cc32_gpio_alt(CC32_GPIO_P3, CC32_GPIO_FUNC2);
+
+	/* configure GPIO11 as output (SPI_nCS) */
+	cc32_gpio_output(BOARD_GPIO_SPI_NCS, 1);
+	/* set to 1 (disable) */
+	cc32_gpio_set(BOARD_GPIO_SPI_NCS, 1);
+
 	if (divide_2n < 2 || divide_2n > 256)
 		return -EINVAL;
 
@@ -79,4 +93,9 @@ int cc32_spi_xcv_byte(uint8_t tx)
 	*SPI_REG(SPIDAT) = tx;
 	while (!(*SPI_REG(SPISTS) & SPISTS_BOVER)) { }
 	return *SPI_REG(SPIDAT);
+}
+
+int cc32_spi_ncs(uint8_t high)
+{
+	cc32_gpio_set(BOARD_GPIO_SPI_NCS, high);
 }

@@ -88,8 +88,8 @@ void uart_sc16is740_init()
 	reg_write(LCR, (3 << 0) | (0 << 2));
 	/* set LCR[7] = 1 (divisor latch) */
 	reg_write(LCR, reg_read(LCR) | 0x80);
-	/* baud rate generator for 9600 */
-	reg_write(DLL, 12);
+	/* baud rate generator for 115200 */
+	reg_write(DLL, 1);
 	reg_write(DLH, 0);
 	/* clear LCR[7] = 0 (divisor latch) */
 	reg_write(LCR, reg_read(LCR) & ~0x80);

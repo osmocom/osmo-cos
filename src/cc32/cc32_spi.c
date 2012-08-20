@@ -40,7 +40,7 @@ enum cc32_spi_reg {
 	SPIDMARPT	= 0x48,
 };
 
-#define SPI_REG(x)	(uint32_t *)((uint8_t *)CC32_SPI_BASE + x)
+#define SPI_REG(x)	(volatile uint32_t *)((uint8_t *)CC32_SPI_BASE + x)
 
 #define SPICON2_RUNEN	(1 << 7)
 
@@ -97,7 +97,7 @@ int cc32_spi_xcv_byte(uint8_t tx)
 	return *SPI_REG(SPIDAT);
 }
 
-int cc32_spi_ncs(uint8_t high)
+void cc32_spi_ncs(uint8_t high)
 {
 	cc32_gpio_set(BOARD_GPIO_SPI_NCS, high);
 }

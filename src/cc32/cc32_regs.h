@@ -1,6 +1,9 @@
 #ifndef _CC32_REGS_H
 #define _CC32_REGS_H
 
+#define CC32_REG(base, x)	(volatile uint32_t *) \
+				((uint8_t *)((base) + (x)))
+
 #define CC32_SYSC_BASE	0x0F0000
 
 enum cc32_sysc_reg {
@@ -22,7 +25,7 @@ enum cc32_sysc_reg {
 	SCCM4		= 0x7C,
 };
 
-#define SYSC_REG(x)	(uint32_t *)((uint8_t *)CC32_SYSC_BASE + x)
+#define SYSC_REG(x)	CC32_REG(CC32_SYSC_BASE, x)
 
 
 #define CC32_GPIO_BASE	0x0f8c00
@@ -34,7 +37,7 @@ enum cc32_gpio_reg {
 	GPIODIR1	= 0x0C,
 };
 
-#define GPIO_REG(x)	(uint32_t *)((uint8_t *)CC32_GPIO_BASE + x)
+#define GPIO_REG(x)	CC32_REG(CC32_GPIO_BASE, x)
 
 
 #endif /* _CC32_REGS_H */

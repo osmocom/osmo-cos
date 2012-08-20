@@ -5,6 +5,6 @@
 
 int cc32_spi_init(uint8_t cpol, uint8_t cpha, uint8_t divide_2n);
 int cc32_spi_xcv_byte(uint8_t tx);
-int cc32_spi_ncs(uint8_t high);
+void cc32_spi_ncs(uint8_t high);
 
 #endif

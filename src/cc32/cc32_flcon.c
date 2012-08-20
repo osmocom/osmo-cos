@@ -33,7 +33,7 @@ enum cc32_flcon_reg {
 	FLBUF		= 0x10,
 };
 
-#define FLCON_REG(x)	(uint32_t *)((uint8_t *)CC32_FLCON_BASE + x)
+#define FLCON_REG(x)	(volatile uint32_t *)((uint8_t *)CC32_FLCON_BASE + x)
 
 
 int cc32_flash_erase(uint32_t offset, uint16_t page_size)

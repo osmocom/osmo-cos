@@ -5,11 +5,11 @@
 #include "cc32_irq.h"
 
 #ifndef readl
-#define readl(addr)	*((unsigned long *)addr)
+#define readl(addr)	*((volatile unsigned long *)addr)
 #endif
 
 #ifndef writel
-#define writel(what, addr) *((unsigned long *)addr) = (what)
+#define writel(what, addr) *((volatile unsigned long *)addr) = (what)
 #endif
 
 enum iso_slave_reg {

@@ -21,9 +21,9 @@ GIT Repository
 
 You can clone from the official osmo-cos.git repository using
 
-	git clone git://git.osmocom.org/osmo-cos.git
+	git clone https://gitea.osmocom.org/sim-card/osmo-cos
 
-There is a cgit interface at <http://git.osmocom.org/osmo-cos/>
+There is a gitea web interface at <https://gitea.osmocom.org/sim-card/osmo-cos>
 
 Mailing List
 ------------
